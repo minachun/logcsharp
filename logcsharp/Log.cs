@@ -24,6 +24,7 @@ namespace logcsharp
         private static bool isAppendLogging;
         private static Level minLevel;
 
+        // ログコンテナクラス
         private class LogAtom
         {
             private Level lvl;
@@ -50,12 +51,13 @@ namespace logcsharp
                     DateTime t = new DateTime(this.currentTime);
                     if ( string.IsNullOrEmpty(this.source) )
                     {
-                        return $"{ t.ToString("yyyy-MM-dd_HH:mm:ss.fff") } | [{this.lvl.ToString()}] | {this.body}\n";
+                        return $"{ t.ToString("yyyy-MM-dd_HH:mm:ss.fff") } | [{this.lvl.ToString()}] | {this.body}";
                     }
                     else
                     {
                         string[] ss = this.source.Split('\\');
-                        return $"{ t.ToString("yyyy-MM-dd_HH:mm:ss.fff") } | [{this.lvl.ToString()}] {ss[^1]}::{this.member}({this.lineno}) | {this.body}\n";
+                        // ログのフォーマットはここで決める
+                        return $"{ t.ToString("yyyy-MM-dd_HH:mm:ss.fff") } | [{this.lvl.ToString()}] {ss[^1]}::{this.member}({this.lineno}) | {this.body}";
                     }
                 }
             }
@@ -72,19 +74,29 @@ namespace logcsharp
         private static void LogWriteProc()
         {
             LogAtom la;
+            bool isT = false;
+            StringBuilder logb = new StringBuilder();
             do
             {
-                if (logfifo.TryTake(out la, 1) == false)
+                lock(logfifo)
                 {
-                    continue;
+                    // 溜まっているかチェック
+                    if ( logfifo.Count == 0 )
+                    {
+                        // 溜まっていないので小休止して
+                        Thread.Sleep(1);
+                        continue;
+                    }
+                    while ( logfifo.Count > 0 )
+                    {
+                        la = logfifo.Take();
+                        logb.AppendLine(la.Contents);
+                        isT = isT || la.IsTerminate;
+                    }
                 }
-                if (la.IsTerminate)
-                {
-                    break;
-                }
-                System.IO.File.AppendAllText(currentLogFileName, la.Contents);
-            } while (true);
-            System.IO.File.AppendAllText(currentLogFileName, la.Contents);
+                System.IO.File.AppendAllText(currentLogFileName, logb.ToString());
+                logb.Clear();
+            } while (isT == false);
         }
 
         public enum Level
@@ -97,7 +109,7 @@ namespace logcsharp
             DETAIL,
         }
 
-        public static void Setup(string basefilename, Level outputLevel, bool isAppend = false, int rotatenum = 0, long rotatesize = 10*1024*1024)
+        public static void Setup(string basefilename, Level outputLevel, bool isAppend = false, int rotatenum = 0, long rotatesize = 10*1024*1024, int fifosize = 1024*128)
         {
             minLevel = outputLevel;
             isAppendLogging = isAppend;
@@ -115,7 +127,7 @@ namespace logcsharp
                 baseLogFileName = basefilename;
                 currentLogFileName = baseLogFileName;
             }
-            logfifo = new BlockingCollection<LogAtom>(1000);
+            logfifo = new BlockingCollection<LogAtom>(fifosize);
             LogWriteThread = new Thread(LogWriteProc);
             LogWriteThread.Start();
             logfifo.Add(new LogAtom(Level.FATAL, "Log Start.", string.Empty, string.Empty, 0));
@@ -131,14 +143,30 @@ namespace logcsharp
 
         public static void WriteFATAL(string body, [CallerFilePath] string _f = "", [CallerMemberName] string _m = "", [CallerLineNumber] int _l = 0)
         {
-            logfifo.Add(new LogAtom(Level.FATAL, body, _f, _m, _l));
+            bool _b;
+            lock(logfifo)
+            {
+                _b = logfifo.TryAdd(new LogAtom(Level.FATAL, body, _f, _m, _l), 1);
+            }
+            if ( !_b )
+            {
+                System.Diagnostics.Debug.WriteLine("[FATAL] Can't write the log.");
+            }
         }
 
         public static void WriteERROR(string body, [CallerFilePath] string _f = "", [CallerMemberName] string _m = "", [CallerLineNumber] int _l = 0)
         {
             if (minLevel >= Level.ERROR)
             {
-                logfifo.Add(new LogAtom(Level.ERROR, body, _f, _m, _l));
+                bool _b;
+                lock(logfifo)
+                {
+                    _b = logfifo.TryAdd(new LogAtom(Level.ERROR, body, _f, _m, _l), 1);
+                }
+                if (!_b)
+                {
+                    System.Diagnostics.Debug.WriteLine("[ERROR] Can't write the log.");
+                }
             }
         }
 
@@ -146,7 +174,15 @@ namespace logcsharp
         {
             if (minLevel >= Level.WARNING)
             {
-                logfifo.Add(new LogAtom(Level.WARNING, body, _f, _m, _l));
+                bool _b;
+                lock (logfifo)
+                {
+                    _b = logfifo.TryAdd(new LogAtom(Level.WARNING, body, _f, _m, _l), 1);
+                }
+                if (!_b)
+                {
+                    System.Diagnostics.Debug.WriteLine("[WARNING] Can't write the log.");
+                }
             }
         }
 
@@ -154,7 +190,15 @@ namespace logcsharp
         {
             if (minLevel >= Level.INFO)
             {
-                logfifo.Add(new LogAtom(Level.INFO, body, _f, _m, _l));
+                bool _b;
+                lock (logfifo)
+                {
+                    _b = logfifo.TryAdd(new LogAtom(Level.INFO, body, _f, _m, _l), 1);
+                }
+                if (!_b)
+                {
+                    System.Diagnostics.Debug.WriteLine("[INFO] Can't write the log.");
+                }
             }
         }
 
@@ -162,7 +206,15 @@ namespace logcsharp
         {
             if (minLevel >= Level.DEBUG)
             {
-                logfifo.Add(new LogAtom(Level.DEBUG, body, _f, _m, _l));
+                bool _b;
+                lock (logfifo)
+                {
+                    _b = logfifo.TryAdd(new LogAtom(Level.DEBUG, body, _f, _m, _l), 1);
+                }
+                if (!_b)
+                {
+                    System.Diagnostics.Debug.WriteLine("[DEBUG] Can't write the log.");
+                }
             }
         }
 
@@ -170,7 +222,15 @@ namespace logcsharp
         {
             if (minLevel >= Level.DETAIL)
             {
-                logfifo.Add(new LogAtom(Level.DETAIL, body, _f, _m, _l));
+                bool _b;
+                lock (logfifo)
+                {
+                    _b = logfifo.TryAdd(new LogAtom(Level.DETAIL, body, _f, _m, _l), 1);
+                }
+                if (!_b)
+                {
+                    System.Diagnostics.Debug.WriteLine("[DETAIL] Can't write the log.");
+                }
             }
         }
 

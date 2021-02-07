@@ -73,7 +73,7 @@ namespace logcsharp
             {
                 Log.WriteINFO($"taskno:{no} count={cnt}");
                 cnt++;
-                if ( cnt % 15 == 15 )
+                if ( (cnt % 128) == 127 )
                 {
                     System.Threading.Thread.Sleep(1);
                 }
