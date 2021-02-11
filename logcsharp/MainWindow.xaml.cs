@@ -73,10 +73,10 @@ namespace logcsharp
             {
                 Log.WriteINFO($"taskno:{no} count={cnt}");
                 cnt++;
-                if ( (cnt % 128) == 127 )
-                {
-                    System.Threading.Thread.Sleep(1);
-                }
+                //if ( (cnt % 128) == 127 )
+                //{
+                //    System.Threading.Thread.Sleep(0);
+                //}
             }
             Log.WriteINFO($"taskno:{no} canceled.");
         }

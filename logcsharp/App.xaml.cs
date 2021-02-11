@@ -15,7 +15,7 @@ namespace logcsharp
     {
         private void Application_Startup(object sender, StartupEventArgs e)
         {
-            Log.Setup("test.log", Log.Level.DETAIL);
+            Log.Setup("test.log", Log.Level.DETAIL, false, 10);
         }
 
         private void Application_Exit(object sender, ExitEventArgs e)

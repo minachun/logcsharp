@@ -21,9 +21,11 @@ namespace logcsharp
         private static int max_rotate;
         private static int cur_rotate;
         private static long max_rotatesize;
+        private static long current_size;
         private static bool isAppendLogging;
         private static Level minLevel;
         private static uint failcount;
+        private static bool isAppendFile;
 
         // ログコンテナクラス
         private class LogAtom
@@ -89,13 +91,28 @@ namespace logcsharp
                     Thread.Sleep(1);
                     continue;
                 }
-                while ( logfifo.Count > 0 )
+                lock(logfifo)
                 {
-                    la = logfifo.Take();
-                    logb.AppendLine(la.Contents);
-                    isT = isT || la.IsTerminate;
+                    // 溜まっている分は全部吐き出す
+                    while (logfifo.Count > 0)
+                    {
+                        la = logfifo.Take();
+                        logb.AppendLine(la.Contents);
+                        isT = isT || la.IsTerminate;
+                    }
                 }
+                // ファイルへ出力
                 System.IO.File.AppendAllText(currentLogFileName, logb.ToString());
+                if ( max_rotate > 0 )
+                {
+                    current_size += logb.Length;
+                    if (current_size >= max_rotatesize )
+                    {
+                        // ファイル名をローテート
+                        Log.RotateFilename();
+                    }
+                }
+                // バッファをクリア
                 logb.Clear();
             } while (isT == false);
         }
@@ -126,8 +143,7 @@ namespace logcsharp
             if ( rotatenum > 0 )
             {
                 string[] lgbase = basefilename.Split('.');
-                string[] basenames = lgbase[0..^1];
-                baseLogFileName = $"{string.Join('.', basenames)}_{{0}}.{lgbase[^1]}";
+                baseLogFileName = $"{string.Join('.', lgbase[0..^1])}_{{0}}.{lgbase[^1]}";
                 cur_rotate = 0;
                 currentLogFileName = string.Format(baseLogFileName, cur_rotate);
             } else
@@ -135,12 +151,38 @@ namespace logcsharp
                 baseLogFileName = basefilename;
                 currentLogFileName = baseLogFileName;
             }
+            // ログバッファを確保
             logfifo = new BlockingCollection<LogAtom>(fifosize);
             failcount = 0;
 
+            isAppendFile = isAppend;
+            if (isAppendFile == false )
+            {
+                // すぐに書いて新規作成にする
+                System.IO.File.AppendText(currentLogFileName).Close();
+            }
+            var fi = new System.IO.FileInfo(currentLogFileName);
+            current_size = fi.Length;
+            logfifo.Add(new LogAtom(Level.FATAL, "Log Start.", string.Empty, string.Empty, 0));
             LogWriteThread = new Thread(LogWriteProc);
             LogWriteThread.Start();
-            logfifo.Add(new LogAtom(Level.FATAL, "Log Start.", string.Empty, string.Empty, 0));
+        }
+
+        private static void RotateFilename()
+        {
+            cur_rotate++;
+            if ( cur_rotate >= max_rotate )
+            {
+                cur_rotate = 0;
+            }
+            currentLogFileName = string.Format(baseLogFileName, cur_rotate);
+            if (isAppendFile == false)
+            {
+                // すぐに書いて新規作成にする
+                System.IO.File.CreateText(currentLogFileName).Close();
+            }
+            var fi = new System.IO.FileInfo(currentLogFileName);
+            current_size = fi.Length;
         }
 
         public static void Terminate()
@@ -154,7 +196,10 @@ namespace logcsharp
         public static void WriteFATAL(string body, [CallerFilePath] string _f = "", [CallerMemberName] string _m = "", [CallerLineNumber] int _l = 0)
         {
             bool _b;
-            _b = logfifo.TryAdd(new LogAtom(Level.FATAL, body, _f, _m, _l), 1);
+            lock(logfifo)
+            {
+                _b = logfifo.TryAdd(new LogAtom(Level.FATAL, body, _f, _m, _l), 1);
+            }
             if ( !_b )
             {
                 failcount++;
@@ -167,7 +212,10 @@ namespace logcsharp
             if (minLevel >= Level.ERROR)
             {
                 bool _b;
-                _b = logfifo.TryAdd(new LogAtom(Level.ERROR, body, _f, _m, _l), 1);
+                lock(logfifo)
+                {
+                    _b = logfifo.TryAdd(new LogAtom(Level.ERROR, body, _f, _m, _l), 1);
+                }
                 if (!_b)
                 {
                     failcount++;
@@ -181,7 +229,10 @@ namespace logcsharp
             if (minLevel >= Level.WARNING)
             {
                 bool _b;
-                _b = logfifo.TryAdd(new LogAtom(Level.WARNING, body, _f, _m, _l), 1);
+                lock(logfifo)
+                {
+                    _b = logfifo.TryAdd(new LogAtom(Level.WARNING, body, _f, _m, _l), 1);
+                }
                 if (!_b)
                 {
                     failcount++;
@@ -195,7 +246,10 @@ namespace logcsharp
             if (minLevel >= Level.INFO)
             {
                 bool _b;
-                _b = logfifo.TryAdd(new LogAtom(Level.INFO, body, _f, _m, _l), 1);
+                lock(logfifo)
+                {
+                    _b = logfifo.TryAdd(new LogAtom(Level.INFO, body, _f, _m, _l), 1);
+                }
                 if (!_b)
                 {
                     failcount++;
@@ -209,7 +263,10 @@ namespace logcsharp
             if (minLevel >= Level.DEBUG)
             {
                 bool _b;
-                _b = logfifo.TryAdd(new LogAtom(Level.DEBUG, body, _f, _m, _l), 1);
+                lock(logfifo)
+                {
+                    _b = logfifo.TryAdd(new LogAtom(Level.DEBUG, body, _f, _m, _l), 1);
+                }
                 if (!_b)
                 {
                     failcount++;
@@ -223,7 +280,10 @@ namespace logcsharp
             if (minLevel >= Level.DETAIL)
             {
                 bool _b;
-                _b = logfifo.TryAdd(new LogAtom(Level.DETAIL, body, _f, _m, _l), 1);
+                lock(logfifo)
+                {
+                    _b = logfifo.TryAdd(new LogAtom(Level.DETAIL, body, _f, _m, _l), 1);
+                }
                 if (!_b)
                 {
                     failcount++;
