@@ -6,7 +6,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
-namespace logcsharp
+namespace CSLog
 {
     public static class Log
     {
